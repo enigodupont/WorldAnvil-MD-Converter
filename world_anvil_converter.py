@@ -6,6 +6,8 @@ the category tree, and writes each article as a Markdown file into the matching
 folder.  Only the ``content`` field of an article is kept – World‑Anvil uses a
 tiny subset of markup which we normalise to plain text.
 
+Vibe coded with local ai.
+
 Typical usage::
 
     python world_anvil_converter.py --source input --output output
@@ -37,7 +39,7 @@ def sanitize_filename(name: str) -> str:
     Replaces the characters ``<>:"/\|?*`` with an underscore, strips
     surrounding whitespace and truncates to 255 characters (NTFS limit).
     """
-    sanitized = re.sub(r'[<>:\"/\\\\|?*]', "_", name)
+    sanitized = re.sub(r'[<>:\"/\\\\|?*]', "-", name)
     return sanitized.strip()[:255]
 
 @dataclass
@@ -66,6 +68,7 @@ def load_json(path: Path) -> dict:
     """Load a JSON file from *path* and return the parsed dictionary."""
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
 def build_category_map(source_dir: Path, output_dir: Path) -> Dict[str, Path]:
     """Return a mapping from category id to the folder ``Path``.
 
@@ -158,18 +161,6 @@ def process_articles(source_dir: Path, cat_map: Dict[str, Path]):
                     article_parent[child_id] = cid
                     children_map[cid].append(child_id)
 
-    # Find the category ID for "Cities / Villages" if present.  This is used
-    # as a fallback when an article has no explicit ``category`` field but
-    # represents a settlement or landmark that should live under this
-    # category.
-    city_villages_cat_id: Optional[str] = None
-    cat_dir = source_dir / "categories"
-    for file in cat_dir.glob("*.json"):
-        data = load_json(file)
-        if data.get("title") == "Cities / Villages":
-            city_villages_cat_id = data["id"]
-            break
-
     # Memoise output directories to avoid recomputing.
     dir_cache: Dict[str, Path] = {}
 
@@ -208,12 +199,17 @@ def process_articles(source_dir: Path, cat_map: Dict[str, Path]):
         return path
 
     # Write all articles.
+    article_count = 0
     for aid, data in article_map.items():
         out_dir = get_dir(aid)
         out_dir.mkdir(parents=True, exist_ok=True)
         filename = out_dir / f"{sanitize_filename(data.get('title', 'Unnamed'))}.md"
         with filename.open("w", encoding="utf-8") as f:
-            f.write(f"# {data.get('title','Untitled')}\n\n{clean_content(data.get('content',''))}")
+            f.write(f"{clean_content(data.get('content',''))}")
+        article_count += 1
+
+    # Return the number of articles written so that callers can report it.
+    return article_count
 
         # This section was part of the old implementation and is no longer
         # needed.  It has been removed to avoid NameError due to undefined
@@ -223,7 +219,7 @@ def process_articles(source_dir: Path, cat_map: Dict[str, Path]):
 def process_histories(source_dir: Path, cat_map: Dict[str, Path]):
     """Process all historical entry JSON files.
 
-    The behaviour mirrors :func:`process_articles`.  Historical entries are
+    The behavior mirrors :func:`process_articles`.  Historical entries are
     simple JSON objects containing a ``title`` and a ``content`` field.  They
     also have an optional ``category`` object that references the category in
     which they should be placed.  If no category is present we fall back to
@@ -373,7 +369,6 @@ def download_images(source_dir: Path, images_output_dir: Path) -> None:
                 content = resp.read()
             with open(dest_path, "wb") as fp:
                 fp.write(content)
-            print(f"Downloaded {url} → {dest_path}")
         except Exception as exc:
             # Use repr to avoid encoding issues with non‑ASCII exception messages.
             print(f"Failed to download {url!r}: {repr(exc)}")
@@ -385,7 +380,8 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     cat_map = build_category_map(SOURCE_DIR, OUTPUT_DIR)
     print(f"Created {len(cat_map)} category folders")
-    process_articles(SOURCE_DIR, cat_map)
+    article_count = process_articles(SOURCE_DIR, cat_map)
+    print(f"Created {article_count} article files")
     # Process historical entries after articles.
     process_histories(SOURCE_DIR, cat_map)
     # Download images from the images folder
@@ -393,7 +389,7 @@ def main() -> int:
         download_images(SOURCE_DIR, OUTPUT_DIR / "world_anvil_images")
     except Exception as e:  # pragma: no cover - network errors are environment dependent
         print(f"Warning: Failed to download images – {e}")
-    print("Conversion complete.")
+    print("Conversion complete! :D")
     return 0
 
 # ---------------------------------------------------------------------------
