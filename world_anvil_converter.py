@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional
+from urllib import request as urlrequest
 
 # ---------------------------------------------------------------------------
 # Configuration – can be overridden via command line.
@@ -228,6 +229,72 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 # ---------------------------------------------------------------------------
+def download_images(source_dir: Path, images_output_dir: Path) -> None:
+    """Download all image JSON entries from ``source_dir/images``.
+
+    The World‑Anvil export contains a folder of JSON files representing
+    images.  Each file contains a ``url`` field pointing to the image
+    hosted on World‑Anvil or an external CDN.  This helper walks that
+    directory, extracts the URL and downloads the image into
+    ``images_output_dir``.
+
+    The output filename is derived from the original filename stored in the
+    JSON (field ``filename``) or falls back to a sanitized version of the
+    title.  Duplicate names are resolved by appending an incrementing
+    counter.
+    """
+    import os
+
+    images_dir = source_dir / "images"
+    if not images_dir.exists():
+        # No images folder – nothing to do.
+        return
+    images_output_dir.mkdir(parents=True, exist_ok=True)
+
+    seen_filenames: Dict[str, int] = {}
+    for json_file in images_dir.glob("*.json"):
+        try:
+            data = load_json(json_file)
+        except Exception as exc:
+            print(f"Skipping {json_file.name}: failed to parse JSON – {exc}")
+            continue
+        url: str | None = data.get("url")
+        if not url:
+            print(f"Skipping {json_file.name}: no URL found")
+            continue
+        # Determine desired filename.
+        original_name = data.get("filename") or data.get("title") or json_file.stem
+        # Sanitize to a safe filesystem name.
+        safe_name = sanitize_filename(original_name)
+        # Preserve extension from URL if available, otherwise use the one
+        # provided in the JSON.
+        ext = os.path.splitext(url)[1]
+        if not ext and "extension" in data:
+            ext = "." + data["extension"]
+        if not ext:
+            ext = ".jpg"
+        full_name = f"{safe_name}{ext}"
+        # Resolve duplicates
+        count = seen_filenames.get(full_name, 0)
+        if count:
+            base, dot, extension = os.path.splitext(full_name)
+            full_name = f"{base}_{count}{extension}"
+        seen_filenames[full_name] = count + 1
+
+        dest_path = images_output_dir / full_name
+        # Skip download if file already exists.
+        if dest_path.exists():
+            continue
+        try:
+            with urlrequest.urlopen(url, timeout=30) as resp:
+                content = resp.read()
+            with open(dest_path, "wb") as fp:
+                fp.write(content)
+            print(f"Downloaded {url} → {dest_path}")
+        except Exception as exc:
+            # Use repr to avoid encoding issues with non‑ASCII exception messages.
+            print(f"Failed to download {url!r}: {repr(exc)}")
+
 def main() -> int:
     args = parse_args()
     global SOURCE_DIR, OUTPUT_DIR
@@ -236,6 +303,11 @@ def main() -> int:
     cat_map = build_category_map(SOURCE_DIR, OUTPUT_DIR)
     print(f"Created {len(cat_map)} category folders")
     process_articles(SOURCE_DIR, cat_map)
+    # Download images from the images folder
+    try:
+        download_images(SOURCE_DIR, OUTPUT_DIR / "world_anvil_images")
+    except Exception as e:  # pragma: no cover - network errors are environment dependent
+        print(f"Warning: Failed to download images – {e}")
     print("Conversion complete.")
     return 0
 
