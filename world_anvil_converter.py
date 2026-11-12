@@ -111,7 +111,7 @@ def build_category_map(source_dir: Path, output_dir: Path) -> Dict[str, Path]:
 
     return cat_map
 # ---------------------------------------------------------------------------
-def process_articles(source_dir: Path, cat_map: Dict[str, Path]):
+def process_articles(source_dir: Path, cat_map: Dict[str, Path], include_creation_date: bool = True):
     """Process all articles and write them into a folder hierarchy.
 
     The algorithm now performs the following steps:
@@ -205,7 +205,14 @@ def process_articles(source_dir: Path, cat_map: Dict[str, Path]):
         out_dir.mkdir(parents=True, exist_ok=True)
         filename = out_dir / f"{sanitize_filename(data.get('title', 'Unnamed'))}.md"
         with filename.open("w", encoding="utf-8") as f:
-            f.write(f"{clean_content(data.get('content',''))}")
+            # Write the cleaned content first
+            f.write(clean_content(data.get('content', '')))
+            # Optionally append the creation date after a blank line.
+            if include_creation_date:
+                creation_info = data.get("creationDate", {})
+                date_str = creation_info.get("date")
+                if date_str:
+                    f.write(f"\n\n---\nCreated on: {date_str}\n")
         article_count += 1
 
     # Return the number of articles written so that callers can report it.
@@ -298,6 +305,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=f"Source directory containing the exported data (default: {DEFAULT_SOURCE_DIR})")
     parser.add_argument("--output", "-o", type=Path, default=DEFAULT_OUTPUT_DIR,
                         help=f"Output directory for the converted Markdown files (default: {DEFAULT_OUTPUT_DIR})")
+    # Flag to include creation date in output.  It is enabled by default.
+    parser.add_argument("--no-creation-date", action="store_false", dest="include_creation_date",
+                        help="Do not append the article's creationDate after its content (default: include it)")
     return parser.parse_args(argv)
 
 # ---------------------------------------------------------------------------
@@ -380,7 +390,7 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     cat_map = build_category_map(SOURCE_DIR, OUTPUT_DIR)
     print(f"Created {len(cat_map)} category folders")
-    article_count = process_articles(SOURCE_DIR, cat_map)
+    article_count = process_articles(SOURCE_DIR, cat_map, include_creation_date=args.include_creation_date)
     print(f"Created {article_count} article files")
     # Process historical entries after articles.
     process_histories(SOURCE_DIR, cat_map)
