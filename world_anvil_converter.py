@@ -111,7 +111,7 @@ def build_category_map(source_dir: Path, output_dir: Path) -> Dict[str, Path]:
 
     return cat_map
 # ---------------------------------------------------------------------------
-def process_articles(source_dir: Path, cat_map: Dict[str, Path], include_creation_date: bool = True):
+def process_articles(source_dir: Path, cat_map: Dict[str, Path], include_creation_date: bool = True, skip_seeded: bool = False):
     """Process all articles and write them into a folder hierarchy.
 
     The algorithm now performs the following steps:
@@ -213,6 +213,11 @@ def process_articles(source_dir: Path, cat_map: Dict[str, Path], include_creatio
                 date_str = creation_info.get("date")
                 if date_str:
                     f.write(f"\n\n---\nCreated on: {date_str}\n")
+            # Append seeded content unless explicitly skipped.
+            if not skip_seeded:
+                seeded_content = data.get("seeded")
+                if seeded_content:
+                    f.write(f"\n\n---\nSeeded Content:\n\n{seeded_content}\n")
         article_count += 1
 
     # Return the number of articles written so that callers can report it.
@@ -223,7 +228,7 @@ def process_articles(source_dir: Path, cat_map: Dict[str, Path], include_creatio
         # variables.
 
 # ---------------------------------------------------------------------------
-def process_histories(source_dir: Path, cat_map: Dict[str, Path]):
+def process_histories(source_dir: Path, cat_map: Dict[str, Path], include_creation_date: bool = True):
     """Process all historical entry JSON files.
 
     The behavior mirrors :func:`process_articles`.  Historical entries are
@@ -299,6 +304,13 @@ def process_histories(source_dir: Path, cat_map: Dict[str, Path]):
             f.write("\n")
             # Write cleaned content
             f.write(clean_content(content))
+
+            # Optionally append the creation date after a blank line.
+            if include_creation_date:
+                creation_info = data.get("creationDate", {})
+                date_str = creation_info.get("date")
+                if date_str:
+                    f.write(f"\n\n---\nCreated on: {date_str}\n")
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert World Anvil JSON export to Markdown")
     parser.add_argument("--source", "-s", type=Path, default=DEFAULT_SOURCE_DIR,
@@ -308,6 +320,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Flag to include creation date in output.  It is enabled by default.
     parser.add_argument("--no-creation-date", action="store_false", dest="include_creation_date",
                         help="Do not append the article's creationDate after its content (default: include it)")
+    # New flag to skip appending seeded content.  By default seeded content is added after the main article body.
+    parser.add_argument("--skip-seeded", action="store_true",
+                        help="Do not append the article's seeded content (default: include it)")
     return parser.parse_args(argv)
 
 # ---------------------------------------------------------------------------
@@ -390,10 +405,12 @@ def main() -> int:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     cat_map = build_category_map(SOURCE_DIR, OUTPUT_DIR)
     print(f"Created {len(cat_map)} category folders")
-    article_count = process_articles(SOURCE_DIR, cat_map, include_creation_date=args.include_creation_date)
+    article_count = process_articles(SOURCE_DIR, cat_map,
+                                     include_creation_date=args.include_creation_date,
+                                     skip_seeded=args.skip_seeded)
     print(f"Created {article_count} article files")
     # Process historical entries after articles.
-    process_histories(SOURCE_DIR, cat_map)
+    process_histories(SOURCE_DIR, cat_map, include_creation_date=args.include_creation_date)
     # Download images from the images folder
     try:
         download_images(SOURCE_DIR, OUTPUT_DIR / "world_anvil_images")
