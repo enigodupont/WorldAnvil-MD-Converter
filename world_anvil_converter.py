@@ -220,6 +220,82 @@ def process_articles(source_dir: Path, cat_map: Dict[str, Path]):
         # variables.
 
 # ---------------------------------------------------------------------------
+def process_histories(source_dir: Path, cat_map: Dict[str, Path]):
+    """Process all historical entry JSON files.
+
+    The behaviour mirrors :func:`process_articles`.  Historical entries are
+    simple JSON objects containing a ``title`` and a ``content`` field.  They
+    also have an optional ``category`` object that references the category in
+    which they should be placed.  If no category is present we fall back to
+    the root output directory.
+
+    Parameters
+    ----------
+    source_dir:
+        The path to the original World‑Anvil export.
+    cat_map:
+        Mapping from category id to output :class:`pathlib.Path` obtained by
+        :func:`build_category_map`.
+    """
+
+    histories_dir = source_dir / "histories"
+    if not histories_dir.exists():
+        # Nothing to process.
+        return
+
+    # All historical entries should be stored under a dedicated ``histories`` folder.
+    histories_output_dir = OUTPUT_DIR / "histories"
+    histories_output_dir.mkdir(parents=True, exist_ok=True)
+
+    for file in histories_dir.glob("*.json"):
+        try:
+            data = load_json(file)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"Skipping {file.name}: failed to parse JSON – {exc}")
+            continue
+
+        title = data.get("title", "Unnamed")
+        content = data.get("content", "")
+        year = data.get("year", "")
+        month = data.get("month", "")
+        day = data.get("day", "")
+        hour = data.get("hour", "")
+        minute = data.get("minute", "")
+        seconds = data.get("seconds", "")
+        ending_year = data.get("endingYear", "")
+        ending_month = data.get("endingMonth", "")
+        ending_day = data.get("endingDay", "")
+        ending_hour = data.get("endingHour", "")
+        ending_minute = data.get("endingMinute", "")
+        ending_seconds = data.get("endingSeconds", "")
+
+        # Sanitize title for use in filename
+        safe_title = sanitize_filename(title)
+        filename = histories_output_dir / f"{year}-{safe_title}.md"
+        with filename.open("w", encoding="utf-8") as f:
+            f.write(f"# {title}\n\n")
+            # Build a Markdown table of date/time fields
+            f.write("| Field | Value |\n")
+            f.write("|-------|-------|\n")
+            for field, value in [
+                ("Year", year),
+                ("Month", month),
+                ("Day", day),
+                ("Hour", hour),
+                ("Minute", minute),
+                ("Seconds", seconds),
+                ("Ending Year", ending_year),
+                ("Ending Month", ending_month),
+                ("Ending Day", ending_day),
+                ("Ending Hour", ending_hour),
+                ("Ending Minute", ending_minute),
+                ("Ending Seconds", ending_seconds),
+            ]:
+                f.write(f"| {field} | {value or ''} |")
+                f.write("\n")
+            f.write("\n")
+            # Write cleaned content
+            f.write(clean_content(content))
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert World Anvil JSON export to Markdown")
     parser.add_argument("--source", "-s", type=Path, default=DEFAULT_SOURCE_DIR,
@@ -273,8 +349,15 @@ def download_images(source_dir: Path, images_output_dir: Path) -> None:
             ext = "." + data["extension"]
         if not ext:
             ext = ".jpg"
-        full_name = f"{safe_name}{ext}"
-        # Resolve duplicates
+        # If the sanitized name already contains an extension that matches
+        # the one we would otherwise append, avoid duplicating it.
+        if ext and safe_name.lower().endswith(ext.lower()):
+            full_name = safe_name
+        else:
+            full_name = f"{safe_name}{ext}"
+
+        # Resolve duplicates – keep the filename (including any extension)
+        # as the key in ``seen_filenames``.
         count = seen_filenames.get(full_name, 0)
         if count:
             base, dot, extension = os.path.splitext(full_name)
@@ -303,6 +386,8 @@ def main() -> int:
     cat_map = build_category_map(SOURCE_DIR, OUTPUT_DIR)
     print(f"Created {len(cat_map)} category folders")
     process_articles(SOURCE_DIR, cat_map)
+    # Process historical entries after articles.
+    process_histories(SOURCE_DIR, cat_map)
     # Download images from the images folder
     try:
         download_images(SOURCE_DIR, OUTPUT_DIR / "world_anvil_images")
